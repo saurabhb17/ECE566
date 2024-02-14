@@ -36,7 +36,8 @@ string funName;
 Module *M;
 LLVMContext TheContext;
 IRBuilder<> Builder(TheContext);
-unordered_map<char*, Value*> Map;
+
+unordered_map<string, Value*> Map;
 
 %}
 
@@ -162,9 +163,7 @@ statement: ID ASSIGN ensemble ENDLINE
 {
   if(Map.find(($1)) == Map.end()) { //does not find the value in the map
     Map[$1] = $3;
-    cout << "Map[$1] is " << Map[$1] << "  \n";
     llvm::Value* strConstant = Builder.CreateGlobalStringPtr($1, "  ");
-    cout << "strConstant is " << strConstant <<  "  \n";
     $$ = strConstant;
   }
 }
@@ -174,23 +173,29 @@ statement: ID ASSIGN ensemble ENDLINE
 
 ensemble:  expr {
   $$ = $1;
+  //cout << "In ensemble, $1 is " << $1 << "  \n";
+  //cout << "In ensemble, $$ is " << $$ << "  \n";
 }
-| expr COLON NUMBER                  // 566 only
-| ensemble COMMA expr
+| expr COLON NUMBER // 566 only
+| ensemble COMMA expr //double check
 {
+  //cout << "In ensemble, $1 and $3 are  " << $1 << "and " << $3 << "  \n";
   Value *one_shl = Builder.CreateShl($1, Builder.getInt32(1));
   Value *two_shl = Builder.CreateShl($3, Builder.getInt32(0));
-  $$ = Builder.CreateOr(one_shl, two_shl);//
-  cout << "$$ is " << $$ << "  "; 
+  $$ = Builder.CreateOr(one_shl, two_shl);
+  //cout << "In ensemble, $$ is " << $$ << "  \n"; 
 }
 | ensemble COMMA expr COLON NUMBER   // 566 only;
 
 expr: ID{
+
     $$ = Map[$1];
+
 }
 | ID NUMBER
 | NUMBER
 {
+  //  cout << "\t\t\tIn expr Number is  " << $1 << "   \n";
   $$ = Builder.getInt32($1);
 }
 | expr PLUS expr
