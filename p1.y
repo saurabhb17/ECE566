@@ -86,6 +86,7 @@ program: inputs statements_opt final
 
 inputs: IN params_list ENDLINE
 {  
+  string func_name_str;
   std::vector<Type*> param_types;
   for(auto s: *$2)
     {
@@ -100,10 +101,24 @@ inputs: IN params_list ENDLINE
   // Create a main function
   Function *Function = Function::Create(FunType,GlobalValue::ExternalLinkage,funName,M);
 
+  vector<string> args;
+  for(auto s: *$2)
+  {
+    args.push_back(s);
+  }
+
+    for (const auto& element : args) {
+        std::cout << element << " \n";
+    }
+
   int arg_no=0;
   for(auto &a: Function->args()) {
     // iterate over arguments of function
     // match name to position
+    Value *arg_ptr = &a;// as it loops, refers first to a, then b, then c
+    Map.insert({args[arg_no],arg_ptr});
+
+    arg_no++;
   }
   
   //Add a basic block to main to hold instructions, and set Builder
@@ -130,11 +145,11 @@ inputs: IN params_list ENDLINE
 params_list: ID
 {
   $$ = new vector<string>;
-  // add ID to vector
+  $$->push_back($1);
 }
 | params_list COMMA ID
 {
-  // add ID to $1
+  $1->push_back($3);
 }
 ;
 
@@ -187,9 +202,7 @@ ensemble:  expr {
 | ensemble COMMA expr COLON NUMBER   // 566 only;
 
 expr: ID{
-
     $$ = Map[$1];
-
 }
 | ID NUMBER{
     Value* charPtr_arg1 = Map[$1];
@@ -203,14 +216,18 @@ expr: ID{
 }
 | NUMBER
 {
-  //  cout << "\t\t\tIn expr Number is  " << $1 << "   \n";
   $$ = Builder.getInt32($1);
 }
 | expr PLUS expr
+{
+  $$ = Builder.CreateAdd($1, $3);
+}
 | expr MINUS expr
-| expr XOR expr{
-    //Value* exprPtr_arg1 = Builder.CreateGlobalStringPtr($1, "1deadbee");
-    //Value* exprPtr_arg3 = Builder.CreateGlobalStringPtr($3, "2badcafe");
+{
+  $$ = Builder.CreateSub($1, $3);
+}
+| expr XOR expr
+{
     $$ = Builder.CreateXor($1, $3);
 }
 | expr AND expr
@@ -218,8 +235,18 @@ expr: ID{
 | INV expr
 | BINV expr
 | expr MUL expr
+{
+  $$ = Builder.CreateMul($1, $3);
+  cout << "MUL result is " << $$ << " \n";
+}
 | expr DIV expr
+{
+  $$ = Builder.CreateUDiv($1, $3);
+}
 | expr MOD expr
+{
+  $$ = Builder.CreateSRem($1, $3);
+}
 | ID LBRACKET ensemble RBRACKET
 | LPAREN ensemble RPAREN
 /* 566 only */
