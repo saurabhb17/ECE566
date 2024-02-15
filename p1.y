@@ -107,10 +107,6 @@ inputs: IN params_list ENDLINE
     args.push_back(s);
   }
 
-    for (const auto& element : args) {
-        std::cout << element << " \n";
-    }
-
   int arg_no=0;
   for(auto &a: Function->args()) {
     // iterate over arguments of function
@@ -120,7 +116,12 @@ inputs: IN params_list ENDLINE
 
     arg_no++;
   }
-  
+     for (const auto& pair : Map) {
+        std::cout << "Key: " << pair.first << ", Value: \n" << pair.second << std::endl;
+        // If you want to access the actual object pointed by the Value*
+        // Uncomment the line below and replace 'YourValueType' with the actual type
+        // std::cout << "Key: " << pair.first << ", Value: " << pair.second->YourValueTypeMember << std::endl;
+    }
   //Add a basic block to main to hold instructions, and set Builder
   //to insert there
   Builder.SetInsertPoint(BasicBlock::Create(TheContext, "entry", Function));
@@ -177,10 +178,14 @@ statements:   statement{
 
 statement: ID ASSIGN ensemble ENDLINE
 {
-  if(Map.find(($1)) == Map.end()) { //does not find the value in the map
+  if(Map.find(($1)) == Map.end()) { //doesn't find value in map
     Map[$1] = $3;
     llvm::Value* strConstant = Builder.CreateGlobalStringPtr($1, "  ");
     $$ = strConstant;
+  }
+  else{
+    Map[$1] = $3;
+    $$ = Map[$1];
   }
 }
 | ID NUMBER ASSIGN ensemble ENDLINE
@@ -193,11 +198,8 @@ ensemble:  expr {
 | expr COLON NUMBER // 566 only
 | ensemble COMMA expr //double check
 {
-  //cout << "In ensemble, $1 and $3 are  " << $1 << "and " << $3 << "  \n";
   Value *one_shl = Builder.CreateShl($1, Builder.getInt32(1));
-  Value *two_shl = Builder.CreateShl($3, Builder.getInt32(0));
-  $$ = Builder.CreateOr(one_shl, two_shl);
-  //cout << "In ensemble, $$ is " << $$ << "  \n"; 
+  $$ = Builder.CreateOr(one_shl, $3);
 }
 | ensemble COMMA expr COLON NUMBER   // 566 only;
 
@@ -228,12 +230,26 @@ expr: ID{
 }
 | expr XOR expr
 {
-    $$ = Builder.CreateXor($1, $3);
+  $$ = Builder.CreateXor($1, $3);
 }
 | expr AND expr
+{
+  $$ = Builder.CreateAnd($1, $3);
+}
 | expr OR expr
+{
+  $$ = Builder.CreateOr($1, $3);
+}
 | INV expr
+{
+  $$ = Builder.CreateNot($2);
+}
 | BINV expr
+{
+  //Value* temp = ConstantInt::get(Builder.getInt32Ty(), 1);
+  Value* temp2 = Builder.CreateOr($2, Builder.getInt32(1));
+  $$ = Builder.CreateNot(temp2);
+}
 | expr MUL expr
 {
   $$ = Builder.CreateMul($1, $3);
@@ -241,13 +257,16 @@ expr: ID{
 }
 | expr DIV expr
 {
-  $$ = Builder.CreateUDiv($1, $3);
+  $$ = Builder.CreateSDiv($1, $3);
 }
 | expr MOD expr
 {
   $$ = Builder.CreateSRem($1, $3);
 }
 | ID LBRACKET ensemble RBRACKET
+{
+  $$ = $3;
+}
 | LPAREN ensemble RPAREN
 /* 566 only */
 | LPAREN ensemble RPAREN LBRACKET ensemble RBRACKET
