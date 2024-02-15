@@ -38,6 +38,7 @@ LLVMContext TheContext;
 IRBuilder<> Builder(TheContext);
 
 unordered_map<string, Value*> Map;
+Value *regs[8] = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
 
 %}
 
@@ -173,8 +174,6 @@ statement: ID ASSIGN ensemble ENDLINE
 
 ensemble:  expr {
   $$ = $1;
-  //cout << "In ensemble, $1 is " << $1 << "  \n";
-  //cout << "In ensemble, $$ is " << $$ << "  \n";
 }
 | expr COLON NUMBER // 566 only
 | ensemble COMMA expr //double check
@@ -192,7 +191,16 @@ expr: ID{
     $$ = Map[$1];
 
 }
-| ID NUMBER
+| ID NUMBER{
+    Value* charPtr_arg1 = Map[$1];
+    Value* intPtr_arg2  = ConstantInt::get(Builder.getInt32Ty(), $2);
+    regs[1] = charPtr_arg1;
+    regs[2] = intPtr_arg2;
+    regs[3] = Builder.CreateLShr(regs[1], regs[2]);
+    $$ = charPtr_arg1;
+    Value* intPtr_arg3  = ConstantInt::get(Builder.getInt32Ty(), 1);
+    $$ = Builder.CreateAnd( regs[3], intPtr_arg3);
+}
 | NUMBER
 {
   //  cout << "\t\t\tIn expr Number is  " << $1 << "   \n";
@@ -200,7 +208,11 @@ expr: ID{
 }
 | expr PLUS expr
 | expr MINUS expr
-| expr XOR expr
+| expr XOR expr{
+    //Value* exprPtr_arg1 = Builder.CreateGlobalStringPtr($1, "1deadbee");
+    //Value* exprPtr_arg3 = Builder.CreateGlobalStringPtr($3, "2badcafe");
+    $$ = Builder.CreateXor($1, $3);
+}
 | expr AND expr
 | expr OR expr
 | INV expr
@@ -241,8 +253,8 @@ unique_ptr<Module> parseP1File(const string &InputFilename)
      this string to figure out the name of the generated function */
   yyin = fopen(InputFilename.c_str(),"r");
 
-//  for(int i=0; i<8; i++)
-//    regs[i] = Builder.getInt32(0);
+  for(int i=0; i<8; i++)
+    regs[i] = Builder.getInt32(0);
   
   //yydebug = 1; 
   if (yyparse() != 0)
