@@ -36,12 +36,9 @@ string funName;
 Module *M;
 LLVMContext TheContext;
 IRBuilder<> Builder(TheContext);
-
 unordered_map<string, Value*> Map;
 Value *regs[8] = {nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr, nullptr};
-
 %}
-
 
 %union {
   vector<string> *params_list;
@@ -116,12 +113,6 @@ inputs: IN params_list ENDLINE
 
     arg_no++;
   }
-     for (const auto& pair : Map) {
-        std::cout << "Key: " << pair.first << ", Value: \n" << pair.second << std::endl;
-        // If you want to access the actual object pointed by the Value*
-        // Uncomment the line below and replace 'YourValueType' with the actual type
-        // std::cout << "Key: " << pair.first << ", Value: " << pair.second->YourValueTypeMember << std::endl;
-    }
   //Add a basic block to main to hold instructions, and set Builder
   //to insert there
   Builder.SetInsertPoint(BasicBlock::Create(TheContext, "entry", Function));
@@ -163,7 +154,9 @@ final: FINAL ensemble endline_opt
 endline_opt: %empty | ENDLINE;
             
 
-statements_opt: %empty
+statements_opt: %empty{
+  
+}
             | statements{
               $$ = $1;
             };
@@ -188,8 +181,14 @@ statement: ID ASSIGN ensemble ENDLINE
     $$ = Map[$1];
   }
 }
-| ID NUMBER ASSIGN ensemble ENDLINE
+| ID NUMBER ASSIGN ensemble ENDLINE //TODO, making fail_4 fail
+{
+  $$ = $4;
+}
 | ID LBRACKET ensemble RBRACKET ASSIGN ensemble ENDLINE
+{
+  $$ = $6;
+}
 ;
 
 ensemble:  expr {
@@ -246,17 +245,12 @@ expr: ID{
 }
 | BINV expr
 {
-  //Value* temp = ConstantInt::get(Builder.getInt32Ty(), 1);
-  $2->dump();
-  Value* temp2 = Builder.CreateXor($2, Builder.getInt32(1));
-  temp2->dump();
-  $$ = Builder.CreateNot(temp2);
-  $$->dump();
+  $$ = Builder.CreateOr($2, Builder.getInt32(1));
+  $$ = Builder.CreateNot($2);
 }
 | expr MUL expr
 {
   $$ = Builder.CreateMul($1, $3);
-  cout << "MUL result is " << $$ << " \n";
 }
 | expr DIV expr
 {
@@ -275,12 +269,36 @@ expr: ID{
   $$ = $2;
 }
 /* 566 only */
+/* Test 13 */
 | LPAREN ensemble RPAREN LBRACKET ensemble RBRACKET
+{
+  $$ = $5;
+}
 | REDUCE AND LPAREN ensemble RPAREN
+{
+  $$ = $4;
+}
 | REDUCE OR LPAREN ensemble RPAREN
+{
+  $$ = $4;
+}
 | REDUCE XOR LPAREN ensemble RPAREN
+{
+  $$ = $4;
+}
 | REDUCE PLUS LPAREN ensemble RPAREN
+{
+  $$ = $4;
+}
 | EXPAND  LPAREN ensemble RPAREN
+{
+//  //extract last bit of ensemble
+//  Value* intPtr_arg9  = ConstantInt::get(Builder.getInt32Ty(), 1);
+//  regs[4] = Builder.CreateAnd( $3, intPtr_arg9);
+//  regs[4]->dump();
+//  //make all remaining 31 bits to that
+  $$ = $3;
+}
 ;
 
 %%
