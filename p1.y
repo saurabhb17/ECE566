@@ -183,9 +183,14 @@ statement: ID ASSIGN ensemble ENDLINE
 }
 | ID NUMBER ASSIGN ensemble ENDLINE //TODO, making fail_4 fail
 {
-  $$ = $4;
+  Value* val_from_map = Map[$1];
+  val_from_map->dump();
+  Value* temp_1 = Builder.CreateLShr(val_from_map, $2);
+  temp_1->dump();
+  Value* temp_2 = Builder.CreateAnd(temp_1, Builder.getInt32(1));
+  $$ = Builder.CreateOr(temp_2, Builder.getInt32(1));
 }
-| ID LBRACKET ensemble RBRACKET ASSIGN ensemble ENDLINE
+| ID LBRACKET ensemble RBRACKET ASSIGN ensemble ENDLINE //TODO, making "flip, syndrom_ecc" test fail
 {
   $$ = $6;
 }
@@ -245,8 +250,7 @@ expr: ID{
 }
 | BINV expr
 {
-  $$ = Builder.CreateOr($2, Builder.getInt32(1));
-  $$ = Builder.CreateNot($2);
+  $$ = Builder.CreateXor($2, Builder.getInt32(1));
 }
 | expr MUL expr
 {
@@ -262,7 +266,10 @@ expr: ID{
 }
 | ID LBRACKET ensemble RBRACKET
 {
-  $$ = $3;
+  Value* val_from_map = Map[$1];//value of the key 'ID'
+  Value* temp_1 = Builder.CreateLShr(val_from_map, $3);// shift the $3 position bit of key ID's value to the LSB
+  Value* temp_2 = Builder.CreateAnd(temp_1, Builder.getInt32(1)); //AND that value with 1
+  $$ = temp_2;
 }
 | LPAREN ensemble RPAREN
 {
@@ -272,7 +279,10 @@ expr: ID{
 /* Test 13 */
 | LPAREN ensemble RPAREN LBRACKET ensemble RBRACKET
 {
-  $$ = $5;
+  Value* val_of_arg1 = $2;//value of the key 'ID'
+  Value* temp_1 = Builder.CreateLShr(val_of_arg1, $5);// shift the $3 position bit of key ID's value to the LSB
+  Value* temp_2 = Builder.CreateAnd(temp_1, Builder.getInt32(1)); //AND that value with 1
+  $$ = temp_2;
 }
 | REDUCE AND LPAREN ensemble RPAREN
 {
