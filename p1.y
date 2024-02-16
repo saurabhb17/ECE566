@@ -247,8 +247,11 @@ expr: ID{
 | BINV expr
 {
   //Value* temp = ConstantInt::get(Builder.getInt32Ty(), 1);
-  Value* temp2 = Builder.CreateOr($2, Builder.getInt32(1));
+  $2->dump();
+  Value* temp2 = Builder.CreateXor($2, Builder.getInt32(1));
+  temp2->dump();
   $$ = Builder.CreateNot(temp2);
+  $$->dump();
 }
 | expr MUL expr
 {
@@ -268,6 +271,9 @@ expr: ID{
   $$ = $3;
 }
 | LPAREN ensemble RPAREN
+{
+  $$ = $2;
+}
 /* 566 only */
 | LPAREN ensemble RPAREN LBRACKET ensemble RBRACKET
 | REDUCE AND LPAREN ensemble RPAREN
