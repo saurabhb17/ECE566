@@ -98,6 +98,7 @@ inputs: IN params_list ENDLINE
   // Create a main function
   Function *Function = Function::Create(FunType,GlobalValue::ExternalLinkage,funName,M);
 
+  //create a vector of strings and push all the args from params_list
   vector<string> args;
   for(auto s: *$2)
   {
@@ -108,9 +109,10 @@ inputs: IN params_list ENDLINE
   for(auto &a: Function->args()) {
     // iterate over arguments of function
     // match name to position
-    Value *arg_ptr = &a;// as it loops, refers first to a, then b, then c
+    Value *arg_ptr = &a;
+    //insert the argument against its argument number such that it forms a key-value pair
     Map.insert({args[arg_no],arg_ptr});
-
+    //increment the argument count for each iteration
     arg_no++;
   }
   //Add a basic block to main to hold instructions, and set Builder
@@ -137,16 +139,19 @@ inputs: IN params_list ENDLINE
 params_list: ID
 {
   $$ = new vector<string>;
+  //if single argument is there, push it to the vector
   $$->push_back($1);
 }
 | params_list COMMA ID
 {
+  //if multiple arguments are seperated by COMMA, add ID to the vector.
   $1->push_back($3);
 }
 ;
 
 final: FINAL ensemble endline_opt
 {
+  //return the ensemble
   $$ = Builder.CreateRet($2);
 }
 ;
@@ -171,32 +176,52 @@ statements:   statement{
 
 statement: ID ASSIGN ensemble ENDLINE
 {
-  if(Map.find(($1)) == Map.end()) { //doesn't find value in map
+  if(Map.find(($1)) == Map.end()) { 
+    // Case: doesn't find value in map.
+    // Insert the ensemble in the Map such that it is linked against ID, 
+    // such that ID and ensemble form a pair in the hashmap
     Map[$1] = $3;
     llvm::Value* strConstant = Builder.CreateGlobalStringPtr($1, "  ");
     $$ = strConstant;
   }
   else{
+    // Case: Value exists in the hashmap. That means the Value against the key "ID" 
+    // is to be updated. So store the ensemble in ID's index in hashmap
     Map[$1] = $3;
     $$ = Map[$1];
   }
 }
 | ID NUMBER ASSIGN ensemble ENDLINE //TODO, making fail_4 fail
 {
+  //get the Value assigned to key ID
   Value* val_from_map = Map[$1];
-  val_from_map->dump();
-  Value* temp_1 = Builder.CreateLShr(val_from_map, $2);
-  temp_1->dump();
+  //Create mask by Left shift the ensemble by NUMBER bits
+  Value* temp_1 = Builder.CreateShl($4, $2);
+  //AND the Extracted bit with 1
   Value* temp_2 = Builder.CreateAnd(temp_1, Builder.getInt32(1));
-  $$ = Builder.CreateOr(temp_2, Builder.getInt32(1));
+  // OR the Anded Value in val_from_map
+  Value* result = Builder.CreateOr(temp_2, val_from_map);
+  //store the result back in the hashmap for the same ID
+  Map[$1] = result;
+  $$ = result;
 }
-| ID LBRACKET ensemble RBRACKET ASSIGN ensemble ENDLINE //TODO, making "flip, syndrom_ecc" test fail
+| ID LBRACKET ensemble RBRACKET ASSIGN ensemble ENDLINE
 {
-  $$ = $6;
+  //original existing value
+  Value* map_value = Map[$1];
+  //bit position of ensemble $3 which will be updated with ensemble $6 
+  Value* bitposition = $3;
+  Value* bit_to_be_pushed = $6;
+  // Equivalent C code for inserting the 'bit' at i'th position -> result = result | (bit << i);
+  Value* leftShiftedBit = Builder.CreateShl(bit_to_be_pushed, bitposition);
+  Value* result = Builder.CreateOr(map_value, leftShiftedBit);
+  Map[$1] = result;
+  $$ = Map[$1];
 }
 ;
 
 ensemble:  expr {
+  //return expr as is
   $$ = $1;
 }
 | expr COLON NUMBER // 566 only
@@ -211,12 +236,16 @@ expr: ID{
     $$ = Map[$1];
 }
 | ID NUMBER{
+    // look up Value for ID in the map
     Value* charPtr_arg1 = Map[$1];
+    //create a temp variable to store value of NUMBER
     Value* intPtr_arg2  = ConstantInt::get(Builder.getInt32Ty(), $2);
     regs[1] = charPtr_arg1;
     regs[2] = intPtr_arg2;
+    //Right shift Value from Map by NUMBER bits
     regs[3] = Builder.CreateLShr(regs[1], regs[2]);
     $$ = charPtr_arg1;
+    //Once value is right shifted, AND it with 1 and return it using $$
     Value* intPtr_arg3  = ConstantInt::get(Builder.getInt32Ty(), 1);
     $$ = Builder.CreateAnd( regs[3], intPtr_arg3);
 }
@@ -266,9 +295,12 @@ expr: ID{
 }
 | ID LBRACKET ensemble RBRACKET
 {
-  Value* val_from_map = Map[$1];//value of the key 'ID'
-  Value* temp_1 = Builder.CreateLShr(val_from_map, $3);// shift the $3 position bit of key ID's value to the LSB
-  Value* temp_2 = Builder.CreateAnd(temp_1, Builder.getInt32(1)); //AND that value with 1
+  //value of the key 'ID'
+  Value* val_from_map = Map[$1];
+  // shift the $3 position bit of key ID's value to the LSB
+  Value* temp_1 = Builder.CreateLShr(val_from_map, $3);
+  //AND that value with 1 and return it
+  Value* temp_2 = Builder.CreateAnd(temp_1, Builder.getInt32(1)); 
   $$ = temp_2;
 }
 | LPAREN ensemble RPAREN
@@ -279,35 +311,92 @@ expr: ID{
 /* Test 13 */
 | LPAREN ensemble RPAREN LBRACKET ensemble RBRACKET
 {
-  Value* val_of_arg1 = $2;//value of the key 'ID'
-  Value* temp_1 = Builder.CreateLShr(val_of_arg1, $5);// shift the $3 position bit of key ID's value to the LSB
-  Value* temp_2 = Builder.CreateAnd(temp_1, Builder.getInt32(1)); //AND that value with 1
+  // value of the ensemble at $2
+  Value* val_of_arg1 = $2;
+  // Right shift the value of ensemble by $5 bits
+  Value* temp_1 = Builder.CreateLShr(val_of_arg1, $5);
+  //AND that value with 1 and return it
+  Value* temp_2 = Builder.CreateAnd(temp_1, Builder.getInt32(1)); 
   $$ = temp_2;
 }
 | REDUCE AND LPAREN ensemble RPAREN
 {
-  $$ = $4;
+  Value* result = Builder.getInt32(0);
+  Value* number_to_be_modified = $4;
+  Value* temp1 = Builder.getInt32(0);
+  Value* temp2 = Builder.getInt32(0);
+  for(int i = 0; i < 32; i++){
+    //right shift the ith bit of the number to be modified to the LSB
+    temp1 = Builder.CreateLShr(number_to_be_modified, Builder.getInt32(i));
+    // AND it with 1 to extract it, and the store it
+    temp2 = Builder.CreateAnd(temp1, Builder.getInt32(1));
+    // AND the mask obtained from above code with the original value
+    result = Builder.CreateAnd(temp2, result);
+  }
+  $$ = result;
 }
 | REDUCE OR LPAREN ensemble RPAREN
 {
-  $$ = $4;
+  Value* result = Builder.getInt32(0);
+  Value* number_to_be_modified = $4;
+  Value* temp1 = Builder.getInt32(0);
+  Value* temp2 = Builder.getInt32(0);
+  for(int i = 0; i < 32; i++){
+    //right shift the ith bit of the number to be modified to the LSB
+    temp1 = Builder.CreateLShr(number_to_be_modified, Builder.getInt32(i));//(bit >> i)
+    // AND it with 1 to extract it, and the store it
+    temp2 = Builder.CreateAnd(temp1, Builder.getInt32(1));//~(1 << pos)
+    // OR the mask obtained from above code with the original value
+    result = Builder.CreateOr(temp2, result);
+  }
+  $$ = result;
 }
 | REDUCE XOR LPAREN ensemble RPAREN
 {
-  $$ = $4;
+  Value* result = Builder.getInt32(0);
+  Value* temp = $4;
+  Value* temp1 = Builder.getInt32(0);
+  Value* temp2 = Builder.getInt32(0);
+  for(int i = 0; i < 32; i++){
+    //right shift the ith bit of the number to be modified to the LSB
+    temp1 = Builder.CreateLShr(temp, Builder.getInt32(i));//(bit >> i)
+    // AND it with 1 to extract it, and the store it
+    temp2 = Builder.CreateAnd(temp1, Builder.getInt32(1));//~(1 << pos)
+    // XOR the mask obtained from above code with the original value
+    result = Builder.CreateXor(temp2, result);
+  }
+  $$ = result;
 }
 | REDUCE PLUS LPAREN ensemble RPAREN
 {
-  $$ = $4;
+  Value* result = Builder.getInt32(0);
+  Value* temp = $4;
+  Value* temp1 = Builder.getInt32(0);
+  Value* temp2 = Builder.getInt32(0);
+  for(int i = 0; i < 32; i++){
+    //right shift the ith bit of the number to be modified to the LSB
+    temp1 = Builder.CreateLShr(temp, Builder.getInt32(i));//(bit >> i)
+    // AND it with 1 to extract it, and the store it
+    temp2 = Builder.CreateAnd(temp1, Builder.getInt32(1));//~(1 << pos)
+    // ADD the mask obtained from above code with the original value
+    result = Builder.CreateAdd(temp2, result);
+  }
+  $$ = result;
 }
-| EXPAND  LPAREN ensemble RPAREN
+| EXPAND LPAREN ensemble RPAREN
 {
-//  //extract last bit of ensemble
-//  Value* intPtr_arg9  = ConstantInt::get(Builder.getInt32Ty(), 1);
-//  regs[4] = Builder.CreateAnd( $3, intPtr_arg9);
-//  regs[4]->dump();
-//  //make all remaining 31 bits to that
-  $$ = $3;
+  Value* bit_to_be_pushed = $3;
+  Value* result = Builder.getInt32(0);
+  Value* temp;
+  int i;
+  for(i = 0; i < 32; i++){
+    //Insert the bit obtained from ensemble at all 32 bits of the return integer
+    //by left shifting the bit, one position at a time and then ORing it with
+    //original number
+    temp = Builder.CreateShl(bit_to_be_pushed, Builder.getInt32(i));//(bit << i)
+    result = Builder.CreateOr(result, temp);//~(1 << pos)
+  }
+  $$ = result;
 }
 ;
 
