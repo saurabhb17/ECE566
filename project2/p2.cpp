@@ -7,7 +7,7 @@
 #include <vector>
 
 #include "llvm-c/Core.h"
-
+#include "llvm/IR/BasicBlock.h"
 #include "llvm/IR/LLVMContext.h"
 #include "llvm/IR/Module.h"
 #include "llvm/IR/Verifier.h"
@@ -96,7 +96,7 @@ int main(int argc, char **argv) {
         Passes.run(*M.get());
     }
 
-    if (1) {
+    if (!NoCSE) {
         CommonSubexpressionElimination(M.get());
     }
 
@@ -239,7 +239,6 @@ bool isDead(Instruction &I) {
 }
 
 static void DeadInstRemoval(Module *M){
-    // uint32_t dead_inst_count = 0;
   // looping over the functions inside a module
   for(Module::iterator i = M->begin(); i!=M->end(); i++){
     Function &Func = *i;
@@ -266,167 +265,108 @@ static void DeadInstRemoval(Module *M){
       }
     }
   }
-    // dead_inst_count = CSEDead;
-    //errs() << "Found a dead instruction "; errs() << CSEDead ; errs()  << "\n";
-
 }
-/*
-Module
-Func
-BB
-Inst
- r1 = add 2,3   
- branch z
- r1 = add 2,3
- call label 1
- r1 = add 2,3
- mul r2, r1
-*/
 
-static void CSEElim_for_CSE(Module *M) {
-    unsigned int i_num_of_Operands;
-    unsigned int j_num_of_Operands;
-    unsigned int j_opcode;
-    unsigned int i_opcode;
-    vector<Value*> i_operands;
-    unsigned int matchFoundCntr = 0;
-    bool instructionCopyFound = true;
+bool isFunctionEmpty(const Function *func) {
+    const BasicBlock &entryBlock = func->getEntryBlock();
+    return entryBlock.empty();
+}
 
-    for (Module::iterator iter = M->begin(); iter != M->end(); ++iter) {
-        Function &Func = *iter;
+static void local_CSE(BasicBlock *bb){
+    bool instructionCopyFound;
+    bool instructionIsLoadOrAlloca;
+    for (BasicBlock::iterator i = bb->begin(); i != bb->end(); ++i) {
+        Instruction *i_inst = &*i;
 
-        for (inst_iterator i = inst_begin(Func), e = inst_end(Func); i != e; ++i) {
-            i_operands.clear();
-            matchFoundCntr = 0;
+        for (BasicBlock::iterator j = std::next(i); j != bb->end(); ++j) {
+            Instruction *j_inst = &*j;
             instructionCopyFound = true;
-            Instruction *i_inst = &*i;
-            i_opcode = i_inst->getOpcode();
-            Type *i_inst_type = i_inst->getType();
-            i_num_of_Operands = i_inst->getNumOperands();
-
-            for (unsigned int i_oprnd = 0; i_oprnd < i_num_of_Operands; ++i_oprnd) {
-                Value *operand = i_inst->getOperand(i_oprnd);
-                i_operands.push_back(operand);
+            instructionIsLoadOrAlloca = false;
+            if((j_inst->getOpcode() == Instruction::Load) || (j_inst->getOpcode() == Instruction::Alloca)){
+                instructionIsLoadOrAlloca = true;
             }
-
-            for (inst_iterator j = std::next(i); j != e; ++j) {
-                Instruction *j_inst = &*j;
-                j_opcode = j_inst->getOpcode();
-                Type *j_inst_type = j_inst->getType();
-                j_num_of_Operands = j_inst->getNumOperands();
-
-                // Compare and perform your CSE logic here
-                if((i_inst_type == j_inst_type) && (i_opcode == j_opcode) && (i_num_of_Operands == j_num_of_Operands)){
-                    for (unsigned int j_oprnd = 0; j_oprnd < j_num_of_Operands; ++j_oprnd) {
-                        Value *operand = j_inst->getOperand(j_oprnd);
-                        if(i_operands[j_oprnd] == operand){
-                            matchFoundCntr++;
-                        }
-                        else
-                            instructionCopyFound = false;
-                    }
-                    if( (matchFoundCntr == i_num_of_Operands) && (instructionCopyFound == true) ){
-                        /*replace all uses of j with i
-                        erase j
-                        CSE_Basic++
-                        */
-                       j_inst->replaceAllUsesWith(i_inst);
-                    //    LLVMValueRef rm = j_inst;
-                       //j_inst->eraseFromParent();
-                       CSEElim++;
-                    }
-                }
+            if(j_inst->isIdenticalTo(i_inst) == false){
+                    instructionCopyFound = false;
+            } 
+            
+            //if instr is NOT load or alloca and copy found
+            if((instructionIsLoadOrAlloca == false) && (instructionCopyFound == true)){
+                j_inst->replaceAllUsesWith(i_inst);
+                CSEElim++;
             }
         }
     }
 }
-// static void CSEElim_for_CSE(Module *M){
-//     inst_iterator i;//i will traverse all instructions in the module, one instruction at a time
-//     inst_iterator j;//j will traverse such that j = i+1
-//                     // if j matches i, delete j and replace all uses of j with i
-//     uint32_t i_opcode;
-//     uint32_t j_opcode;
-//     Value* i_inst_type;
-//     Value* j_inst_type;
 
-//     for(Module::iterator iter = M->begin(); iter!=M->end(); iter++){
-//         Function &Func = *iter;
-//         i = inst_begin(Func);
+static void CSEElim_for_CSE(Module *M) {
+    bool instructionCopyFound;
+    bool instructionIsLoadOrAlloca;
+    bool doesItDominates;
+    BasicBlock *fixed_basic_block;
+    BasicBlock *iterating_basic_block;
+    DominatorTree DT;
 
-//         while(i != inst_end(Func)){
-//             i_inst_type = LLVMTypeOf(*i);
-//             i_opcode = i->getOpcode();
-//             *j = LLVMGetNextInstruction(*i);
-//             while(j != inst_end(Func)){
-//                 j_inst_type = LLVMTypeOf(*j);
-//                 j_opcode = *j->getOpcode();
-//                 j = LLVMGetNextInstruction(*j);
-//             } 
-//         i = LLVMGetNextInstruction(*i);
-//         }         
-//     }
+    //iterate all functions inside module
+    for (Module::iterator iter = M->begin(); iter != M->end(); ++iter) { //MODULE
+        Function &func = *iter;
+        // if function is empty you will have to check that before declaring DT
+        if(isFunctionEmpty(&func) == false){
+            DT.recalculate(func);
+        }
+
+        for(Function::iterator f_iter = func.begin(); f_iter != func.end(); f_iter++){//FUNCTION
+            BasicBlock *bb = &*f_iter;
+            fixed_basic_block = bb;
+            iterating_basic_block = fixed_basic_block->getSingleSuccessor();
+            local_CSE(fixed_basic_block);
+
+            // doesItDominates = DT.dominates(fixed_basic_block, iterating_basic_block);
+            
+            // if(doesItDominates){
+            //     for(BasicBlock::iterator bb_iter = iterating_basic_block->begin(); bb_iter != iterating_basic_block->end();){ //BASICBLOCK
+
+            //     }         
+            // }
+        }   
+    }
+}
+
+// static void CSEElim_for_CSE(Module *M) {
+//     bool instructionCopyFound;
+//     bool instructionIsLoadOrAlloca;
+//     //iterate all functions inside module
+    // for (Module::iterator iter = M->begin(); iter != M->end(); ++iter) {
+    //     Function &Func = *iter;
+    //     //iterates over all instructions of all functions directly
+    //     for (inst_iterator i = inst_begin(Func), e = inst_end(Func); i != e; ++i) {
+    //         instructionCopyFound = true;
+    //         Instruction *i_inst = &*i;
+    //         //i_inst is kept constant for one loop, whereas j_inst, using the inner
+    //         //for loop will check the rest of the instructions if there is a match
+
+    //         //inner loop with j_inst iterating over i_inst+1 till end_of_instructions
+    //         for (inst_iterator j = std::next(i); j != e; ++j) {
+    //             Instruction *j_inst = &*j;
+    //             instructionCopyFound = true;
+    //             instructionIsLoadOrAlloca = false;
+
+    //             if((j_inst->getOpcode() == Instruction::Load) || (j_inst->getOpcode() == Instruction::Alloca)){
+    //                 instructionIsLoadOrAlloca = true;
+    //             }
+
+    //             if(j_inst->isIdenticalTo(i_inst) == false){
+    //                     instructionCopyFound = false;
+    //             } 
+                
+    //             //if instr is NOT load or alloca and copy found
+    //             if((instructionIsLoadOrAlloca == false) && (instructionCopyFound == true)){
+    //                 j_inst->replaceAllUsesWith(i_inst);
+    //                 CSEElim++;
+    //             }
+    //         }
+    //     }
+    // }
 // }
-
-//static void CSEElim_for_CSE(Module *M){
-//     std::set<Instruction*> new_worklist;
-//     bool duplicate_inst_found = false;
-//     bool first_opcode_match_found = false;
-//     unsigned int worklist_inst_opcode;
-//     unsigned int inst_iterator_opcode;
-
-
-//     for(Module::iterator i = M->begin(); i!=M->end(); i++){
-//         Function &Func = *i;
-//         for (inst_iterator I = inst_begin(Func), E = inst_end(Func); I != E; ++I){
-//             if (new_worklist.find(&*I) != new_worklist.end()) {
-//             // Instruction already exists in the worklist, ignore
-//                 continue;
-//             } else {
-//                 new_worklist.insert(&*I);
-//             }
-//         }
-//     }
-//     //All unique instructions are now in new_worklist
-
-//     for (auto it = new_worklist.begin(); it != new_worklist.end(); ++it) {
-//         // 'it' is an iterator pointing to the current instruction
-//         Instruction* currentInstruction = *it;
-//         worklist_inst_opcode = currentInstruction->getOpcode();
-
-//         for(Module::iterator i = M->begin(); i!=M->end(); i++){
-//             Function &Func = *i;
-//             for (inst_iterator I = inst_begin(Func), E = inst_end(Func); I != E; ++I){
-//                 inst_iterator_opcode = I->getOpcode();
-//                 if(inst_iterator_opcode == worklist_inst_opcode){
-//                     first_opcode_match_found = true;
-//                 }
-
-//                 if(first_opcode_match_found){
-
-//                 }
-//             }
-//         }
-// }
-
-
-//     // //Iterate through all instructions again, if there is a hit in the new_worklist, delete it from parent
-//     // for(Module::iterator i = M->begin(); i!=M->end(); i++){
-//     //     Function &Func = *i;
-//     //     for (inst_iterator I = inst_begin(Func), E = inst_end(Func); I != E; ++I){
-//     //         if (new_worklist.find(&*I) != new_worklist.end()) {
-//     //         // Atleast 1 match for the Instruction found in the worklist
-//     //             for(inst_iterator Inst = I, E = inst_end(Func); Inst != E; ++Inst){
-//     //                 if(Inst == )
-//     //                 Inst->eraseFromParent();
-//     //                 CSEElim++;
-//     //             }
-//     //         }
-//     //     }
-//     // }    
-        
-//     // LLVMValueRef i = LLVMGetNextInstruction(wrap(&(*I)));
-//     // I is iterator for insturctions in basicblcok    
-//}
 
 static void CommonSubexpressionElimination(Module *M) {
     DeadInstRemoval(M);
