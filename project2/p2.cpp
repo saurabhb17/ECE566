@@ -267,108 +267,79 @@ static void DeadInstRemoval(Module *M){
   }
 }
 
+
 bool isFunctionEmpty(const Function *func) {
     const BasicBlock &entryBlock = func->getEntryBlock();
     return entryBlock.empty();
 }
 
-static void local_CSE(BasicBlock *bb){
-    bool instructionCopyFound;
-    bool instructionIsLoadOrAlloca;
-    for (BasicBlock::iterator i = bb->begin(); i != bb->end(); ++i) {
-        Instruction *i_inst = &*i;
+static void global_CSE(BasicBlock *bb, Instruction *Inst_in){
+    Function *function = bb->getParent();
+    DominatorTree DT_gcse(*function);
 
-        for (BasicBlock::iterator j = std::next(i); j != bb->end(); ++j) {
-            Instruction *j_inst = &*j;
-            instructionCopyFound = true;
-            instructionIsLoadOrAlloca = false;
-            if((j_inst->getOpcode() == Instruction::Load) || (j_inst->getOpcode() == Instruction::Alloca)){
-                instructionIsLoadOrAlloca = true;
+    SmallVector<BasicBlock*, 8> BB_descendants;
+    DT_gcse.getDescendants(bb, BB_descendants);//Piazza 324
+    
+    for(auto &iterating_bb : BB_descendants){
+        if(iterating_bb == bb){
+            continue;
+        }
+        else {
+            std::vector<Instruction*> inst_tobe_deleted;
+            for(auto I = iterating_bb->begin(); I != iterating_bb->end(); I++){
+                auto next_inst = I;
+                if(next_inst->isIdenticalTo(Inst_in) == true){
+                    next_inst->replaceAllUsesWith(Inst_in);
+                    CSEElim++;
+                    inst_tobe_deleted.push_back(&(*next_inst));
+                }
             }
-            if(j_inst->isIdenticalTo(i_inst) == false){
-                    instructionCopyFound = false;
-            } 
-            
-            //if instr is NOT load or alloca and copy found
-            if((instructionIsLoadOrAlloca == false) && (instructionCopyFound == true)){
-                j_inst->replaceAllUsesWith(i_inst);
-                CSEElim++;
+
+            for (auto* instruction : inst_tobe_deleted) {
+                instruction->eraseFromParent();
             }
         }
     }
 }
 
-static void CSEElim_for_CSE(Module *M) {
-    bool instructionCopyFound;
-    bool instructionIsLoadOrAlloca;
-    bool doesItDominates;
-    BasicBlock *fixed_basic_block;
-    BasicBlock *iterating_basic_block;
-    DominatorTree DT;
+static void local_CSE(Module *M){
+    bool isRestrictedInst = false;
+    for(auto &func : *M){
+        for(auto &basicblock : func){
+            //create DT for each block
+            for(auto inst = basicblock.begin(); inst != basicblock.end(); inst++){
+                if( (isa<LoadInst>(*inst)) || (isa<StoreInst>(*inst)) || (isa<BranchInst>(*inst)) || (isa<ReturnInst>(*inst)) || (isa<CallInst>(*inst)) 
+                    || (isa<PHINode>(*inst)) || (isa<AllocaInst>(*inst)) || (isa<FCmpInst>(*inst)) || (isa<VAArgInst>(*inst)) ){
+                        isRestrictedInst = true;
+                }
 
-    //iterate all functions inside module
-    for (Module::iterator iter = M->begin(); iter != M->end(); ++iter) { //MODULE
-        Function &func = *iter;
-        // if function is empty you will have to check that before declaring DT
-        if(isFunctionEmpty(&func) == false){
-            DT.recalculate(func);
+                if(isRestrictedInst){
+                    continue;
+                }
+                else{
+                    auto next_inst = inst;
+                    next_inst++;
+                    std::vector<Instruction*> tobe_deleted;
+                    for(; next_inst != basicblock.end(); next_inst++){
+                        if((*next_inst).isIdenticalTo(&*inst)){
+                            (*next_inst).replaceAllUsesWith(&(*inst));
+                            tobe_deleted.push_back(&(*next_inst));
+                        }
+                    }
+
+                    for(auto k: tobe_deleted){
+                        k->eraseFromParent();
+                        CSEElim++;
+                    }
+
+                    global_CSE(&basicblock, &(*inst));
+                }
+            }
         }
-
-        for(Function::iterator f_iter = func.begin(); f_iter != func.end(); f_iter++){//FUNCTION
-            BasicBlock *bb = &*f_iter;
-            fixed_basic_block = bb;
-            iterating_basic_block = fixed_basic_block->getSingleSuccessor();
-            local_CSE(fixed_basic_block);
-
-            // doesItDominates = DT.dominates(fixed_basic_block, iterating_basic_block);
-            
-            // if(doesItDominates){
-            //     for(BasicBlock::iterator bb_iter = iterating_basic_block->begin(); bb_iter != iterating_basic_block->end();){ //BASICBLOCK
-
-            //     }         
-            // }
-        }   
     }
 }
-
-// static void CSEElim_for_CSE(Module *M) {
-//     bool instructionCopyFound;
-//     bool instructionIsLoadOrAlloca;
-//     //iterate all functions inside module
-    // for (Module::iterator iter = M->begin(); iter != M->end(); ++iter) {
-    //     Function &Func = *iter;
-    //     //iterates over all instructions of all functions directly
-    //     for (inst_iterator i = inst_begin(Func), e = inst_end(Func); i != e; ++i) {
-    //         instructionCopyFound = true;
-    //         Instruction *i_inst = &*i;
-    //         //i_inst is kept constant for one loop, whereas j_inst, using the inner
-    //         //for loop will check the rest of the instructions if there is a match
-
-    //         //inner loop with j_inst iterating over i_inst+1 till end_of_instructions
-    //         for (inst_iterator j = std::next(i); j != e; ++j) {
-    //             Instruction *j_inst = &*j;
-    //             instructionCopyFound = true;
-    //             instructionIsLoadOrAlloca = false;
-
-    //             if((j_inst->getOpcode() == Instruction::Load) || (j_inst->getOpcode() == Instruction::Alloca)){
-    //                 instructionIsLoadOrAlloca = true;
-    //             }
-
-    //             if(j_inst->isIdenticalTo(i_inst) == false){
-    //                     instructionCopyFound = false;
-    //             } 
-                
-    //             //if instr is NOT load or alloca and copy found
-    //             if((instructionIsLoadOrAlloca == false) && (instructionCopyFound == true)){
-    //                 j_inst->replaceAllUsesWith(i_inst);
-    //                 CSEElim++;
-    //             }
-    //         }
-    //     }
-    // }
-// }
 
 static void CommonSubexpressionElimination(Module *M) {
     DeadInstRemoval(M);
-    CSEElim_for_CSE(M);
+    local_CSE(M);
 }
