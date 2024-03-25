@@ -165,7 +165,7 @@ static llvm::Statistic CSEStore2Load = {"", "CSEStore2Load", "CSE forwarded stor
 static llvm::Statistic CSEStElim = {"", "CSEStElim", "CSE redundant stores"};
 
 bool isDead(Instruction &I) {
- 
+
   int opcode = I.getOpcode();
   switch(opcode){
   case Instruction::Add:
@@ -256,7 +256,7 @@ static void DeadInstRemoval(Module *M){
               inst.replaceAllUsesWith(val);
               CSESimplify++;
               //remove later
-              CSELdElim++;
+              
               CSEStore2Load++;
               CSEStElim++;
             }
@@ -268,10 +268,10 @@ static void DeadInstRemoval(Module *M){
 }
 
 
-bool isFunctionEmpty(const Function *func) {
-    const BasicBlock &entryBlock = func->getEntryBlock();
-    return entryBlock.empty();
-}
+// bool isFunctionEmpty(const Function *func) {
+//     const BasicBlock &entryBlock = func->getEntryBlock();
+//     return entryBlock.empty();
+// }
 
 static void global_CSE(BasicBlock *bb, Instruction *Inst_in){
     Function *function = bb->getParent();
@@ -302,18 +302,25 @@ static void global_CSE(BasicBlock *bb, Instruction *Inst_in){
     }
 }
 
+// int glob_counter = 0;
 static void local_CSE(Module *M){
-    bool isRestrictedInst = false;
+    bool isRestrictedInst; //dont perform CSE on these instructions
+
     for(auto &func : *M){
         for(auto &basicblock : func){
             //create DT for each block
+            
             for(auto inst = basicblock.begin(); inst != basicblock.end(); inst++){
-                if( (isa<LoadInst>(*inst)) || (isa<StoreInst>(*inst)) || (isa<BranchInst>(*inst)) || (isa<ReturnInst>(*inst)) || (isa<CallInst>(*inst)) 
-                    || (isa<PHINode>(*inst)) || (isa<AllocaInst>(*inst)) || (isa<FCmpInst>(*inst)) || (isa<VAArgInst>(*inst)) ){
+                isRestrictedInst = false;
+
+                if( (isa<LoadInst>(*inst)) || (isa<AllocaInst>(*inst))  || (isa<StoreInst>(*inst)) || (isa<ReturnInst>(*inst)) ||
+                    (isa<CallInst>(*inst)) || (isa<PHINode>(*inst))     || (isa<BranchInst>(*inst)) ) {
                         isRestrictedInst = true;
                 }
 
                 if(isRestrictedInst){
+                    // glob_counter++;
+                    // errs() << ("glob counter = ") << glob_counter << " \n";
                     continue;
                 }
                 else{
@@ -327,8 +334,8 @@ static void local_CSE(Module *M){
                         }
                     }
 
-                    for(auto k: tobe_deleted){
-                        k->eraseFromParent();
+                    for(auto inst_iter: tobe_deleted){
+                        inst_iter->eraseFromParent();
                         CSEElim++;
                     }
 
@@ -339,7 +346,79 @@ static void local_CSE(Module *M){
     }
 }
 
+/*
+While traversing the instructions in a single basic block, if you come across a load we will look to see if there are redundant loads within the same basic block only.
+You may only eliminate a later load as redundant if the later load is not volatile, it loads the same address, it loads the same type of operand, and there are no 
+intervening stores or calls to any address.
+
+Here is the pseudocode you should follow:
+for each load, L:
+    for each instruction, R, that follows L in its basic block:
+        if R is load && R is not volatile and R’s load address is the same as L && TypeOf(R)==TypeOf(L):
+            Replace all uses of R with L
+            Erase R
+            CSERLoad++
+        if R is a store:
+            break (stop considering load L, move on)
+*/
+
+static void elim_red_loads(Module* M){
+    for(auto &func : *M){
+        for(auto &basicblock : func){     
+                   
+            for(auto inst = basicblock.begin(); inst != basicblock.end(); inst++){
+                //for each load, L:
+                //(*inst).print(errs() << "\n");
+                if((isa<LoadInst>(*inst))){
+                    bool LoadMatchDetected = false;
+                    // errs() << "\nIs a load instruction\n";
+                    //Value* val1 = (*inst).getOperand(0);
+                    //Value* val1 = (*inst).getPointerOperand(0);
+                    Value* val1 = inst->getOperand(0);
+                    auto next_inst = inst;
+                    next_inst++;
+                    std::vector<Instruction*> inst_tobe_deleted;
+                    for(; next_inst != basicblock.end(); next_inst++){
+                        if( (isa<StoreInst>(*next_inst)) || (isa<CallInst>(*next_inst)) ){
+                            //stop considering inst altogether
+                            //errs() << "\t\tstop considering inst altogether\n" ;
+                            //(*next_inst).print(errs() << "\n");
+                            break;
+                        }
+                        
+                        //later inst is load, NOT volatile, has same address and has same type (phew!! what a relief!)
+                        if( ( isa<LoadInst>(*next_inst) ) && ( (*next_inst).isVolatile() == false ) && 
+                            ( (*inst).getType() == (*next_inst).getType() ) ) {
+                            //Replace all uses of next_inst with inst
+                            Value* val2 = next_inst->getOperand(0);
+                            if(val1 == val2){
+                                (*next_inst).replaceAllUsesWith(&(*inst));
+                                //Erase next_inst
+                                inst_tobe_deleted.push_back((&*next_inst));
+                                CSELdElim++;
+                                LoadMatchDetected = true;
+                            }
+                        }
+                        else
+                            continue;
+                    }//end of checking if the instructions after the detected load 'could be' a match for elimination 
+                        //delete all redundantinstructions
+                    if(LoadMatchDetected == true){
+                        for(auto inst_iter: inst_tobe_deleted){
+                            inst_iter->eraseFromParent();
+                        }
+                    }
+                }
+            }//end of instruction iteration in the basic block
+        }//end of block iteration within a function
+    }//end of function iteration within a module
+}
+
 static void CommonSubexpressionElimination(Module *M) {
     DeadInstRemoval(M);
     local_CSE(M);
+    elim_red_loads(M);
+    errs() << "CSEElim = " << CSEElim << " \n";
+    errs() << "CSEDead = " << CSEDead << " \n";
+    errs() << "CSELdElim = " << CSELdElim << " \n";
 }
